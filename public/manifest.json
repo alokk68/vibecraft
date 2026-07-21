@@ -1,0 +1,16 @@
+{
+  "name": "VibeCraft AI Studio",
+  "short_name": "VibeCraft",
+  "description": "A hybrid architecture AI image enhancement studio.",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#06060e",
+  "theme_color": "#7c3aed",
+  "icons": [
+    {
+      "src": "/favicon.ico",
+      "sizes": "64x64",
+      "type": "image/x-icon"
+    }
+  ]
+}
