@@ -1,0 +1,11 @@
+gradio
+spaces
+torch==2.11.0
+torchvision
+numpy
+opencv-python-headless
+Pillow
+facexlib
+gfpgan
+realesrgan
+basicsr
