@@ -1,0 +1,53 @@
+name: Bug Report
+description: File a bug report for a crash, memory leak, or WebGPU failure.
+title: "[BUG]: "
+labels: ["bug", "triage"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Please provide as much context as possible. WebGPU errors are often silent or hardware-specific. If your tab crashed, say so.
+  - type: dropdown
+    id: mode
+    attributes:
+      label: Mode used
+      description: Which inference mode were you using when the crash occurred?
+      options:
+        - Instant Mode (Browser WebGPU/WASM)
+        - Studio Mode (Cloudflare Edge)
+        - Restore Mode (Hugging Face CPU)
+    validations:
+      required: true
+  - type: dropdown
+    id: device
+    attributes:
+      label: Device type
+      options:
+        - Desktop (Windows/Mac/Linux)
+        - Mobile (iOS/Android)
+    validations:
+      required: true
+  - type: input
+    id: browser
+    attributes:
+      label: Browser & Version
+      description: "Crucial for WebGPU bugs. Example: Chrome 117, Safari 16.4"
+      placeholder: "e.g. Safari 17.0"
+    validations:
+      required: true
+  - type: textarea
+    id: reproduction
+    attributes:
+      label: Steps to reproduce
+      description: Explain exactly how to reproduce the issue.
+      placeholder: "1. Uploaded a 4K image...\n2. Clicked Instant Mode..."
+    validations:
+      required: true
+  - type: textarea
+    id: console_logs
+    attributes:
+      label: Console Logs
+      description: Paste any errors from the browser console or network tab (400, 413, 503).
+      render: shell
+    validations:
+      required: false
