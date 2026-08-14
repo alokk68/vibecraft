@@ -26,11 +26,10 @@ export const POST = withRobustness(async (req: NextRequest) => {
       );
     }
 
-    const gradioPayload = {
+    const payload = {
       data: [image, mode]
     };
 
-    // free HF spaces are incredibly slow to wake up from sleep
     const controller = new AbortController();
     const timeoutId = setTimeout(() => controller.abort(), 180000); 
 
@@ -42,70 +41,62 @@ export const POST = withRobustness(async (req: NextRequest) => {
       headers['Authorization'] = `Bearer ${hfToken}`;
     }
 
-    let submitResponse;
+    let submitRes;
     try {
-      // Gradio 6+ API - Step 1: Submit prediction and get Event ID
-      submitResponse = await fetch(`${spaceUrl.replace(/\/$/, '')}/gradio_api/call/predict`, {
+      submitRes = await fetch(`${spaceUrl.replace(/\/$/, '')}/gradio_api/call/predict`, {
         method: 'POST',
         headers,
-        body: JSON.stringify(gradioPayload),
+        body: JSON.stringify(payload),
         signal: controller.signal,
       });
-    } catch (err: any) {
-      if (err.name === 'AbortError') {
-        throw new Error('HF Space took too long to respond (timeout). It might be cold starting. Please try again.');
+    } catch (err) {
+      if (err instanceof Error && err.name === 'AbortError') {
+        throw new Error('HF Space timeout, might be cold starting.');
       }
       throw err;
     } 
 
-    if (!submitResponse.ok) {
-      const errText = await submitResponse.text();
-      if (submitResponse.status === 503) {
-        throw new Error('The AI model is currently waking up from sleep. Please try again in a minute.');
+    if (!submitRes.ok) {
+      const errText = await submitRes.text();
+      if (submitRes.status === 503) {
+        throw new Error('AI model is waking up, try again in a minute.');
       }
-      throw new Error(`HF Space submit error (${submitResponse.status}): ${errText}`);
+      throw new Error(`HF Space submit error (${submitRes.status}): ${errText}`);
     }
 
-    const submitData = await submitResponse.json();
+    const submitData = await submitRes.json();
     if (!submitData.event_id) {
       throw new Error('Failed to get event_id from HF Space');
     }
 
-    let resultResponse;
+    let resultRes;
     try {
-      // Gradio 6+ API - Step 2: Get result via SSE stream using Event ID
-      resultResponse = await fetch(`${spaceUrl.replace(/\/$/, '')}/gradio_api/call/predict/${submitData.event_id}`, {
+      resultRes = await fetch(`${spaceUrl.replace(/\/$/, '')}/gradio_api/call/predict/${submitData.event_id}`, {
         method: 'GET',
         headers,
         signal: controller.signal,
       });
-    } catch (err: any) {
+    } catch (err) {
       throw err;
     } finally {
       clearTimeout(timeoutId);
     }
 
-    if (!resultResponse.ok) {
-      throw new Error(`HF Space result error (${resultResponse.status})`);
+    if (!resultRes.ok) {
+      throw new Error(`HF Space result error (${resultRes.status})`);
     }
 
-    // SSE format data parse karna (e.g., "data: [null, {url: ...}]\n\nevent: complete")
-    const sseText = await resultResponse.text();
-    
-    // Starline dhundho jo 'data: ' se shuru hoti hai aur JSON array rakhti hai
+    const sseText = await resultRes.text();
     const dataLine = sseText.split('\n').find(l => l.startsWith('data: ') && !l.includes('event:'));
     
     if (!dataLine) {
-      throw new Error('Received empty or invalid SSE response from HF Space');
+      throw new Error('Received empty SSE response from HF Space');
     }
 
     const parsedData = JSON.parse(dataLine.replace('data: ', ''));
-    
-    // Gradio 6 output format: [error, data_array] or just [data_array]
-    // Hum pehla valid element nikal rahe hain jo image data contain karta hai
     const resultImage = Array.isArray(parsedData) ? (parsedData.length > 1 ? parsedData[1] : parsedData[0]) : null;
 
-    invariant(resultImage, 'GFPGAN returned empty array — HF space likely went to sleep mid-inference');
+    invariant(resultImage, 'GFPGAN returned empty array');
 
     if (!resultImage) {
       throw new Error('Received empty response from HF Space');
@@ -117,7 +108,10 @@ export const POST = withRobustness(async (req: NextRequest) => {
       processingTime: Date.now() - startTime
     });
 
-  } catch (err: any) {
-    throw err;
+  } catch (err) {
+    if (err instanceof Error) {
+      throw err;
+    }
+    throw new Error('An unknown error occurred');
   }
 });
