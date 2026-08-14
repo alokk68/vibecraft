@@ -1,4 +1,3 @@
-/* eslint-disable @typescript-eslint/no-explicit-any */
 import { NextResponse, NextRequest } from 'next/server';
 import { withRobustness } from '@/lib/apiMiddleware';
 import { invariant } from '@/lib/invariant';
@@ -43,9 +42,10 @@ export const POST = withRobustness(async (req: NextRequest) => {
       headers['Authorization'] = `Bearer ${hfToken}`;
     }
 
-    let response;
+    let submitResponse;
     try {
-      response = await fetch(`${spaceUrl.replace(/\/$/, '')}/gradio_api/call/predict`, {
+      // Gradio 6+ API - Step 1: Submit prediction and get Event ID
+      submitResponse = await fetch(`${spaceUrl.replace(/\/$/, '')}/gradio_api/call/predict`, {
         method: 'POST',
         headers,
         body: JSON.stringify(gradioPayload),
@@ -56,26 +56,55 @@ export const POST = withRobustness(async (req: NextRequest) => {
         throw new Error('HF Space took too long to respond (timeout). It might be cold starting. Please try again.');
       }
       throw err;
+    } 
+
+    if (!submitResponse.ok) {
+      const errText = await submitResponse.text();
+      if (submitResponse.status === 503) {
+        throw new Error('The AI model is currently waking up from sleep. Please try again in a minute.');
+      }
+      throw new Error(`HF Space submit error (${submitResponse.status}): ${errText}`);
+    }
+
+    const submitData = await submitResponse.json();
+    if (!submitData.event_id) {
+      throw new Error('Failed to get event_id from HF Space');
+    }
+
+    let resultResponse;
+    try {
+      // Gradio 6+ API - Step 2: Get result via SSE stream using Event ID
+      resultResponse = await fetch(`${spaceUrl.replace(/\/$/, '')}/gradio_api/call/predict/${submitData.event_id}`, {
+        method: 'GET',
+        headers,
+        signal: controller.signal,
+      });
+    } catch (err: any) {
+      throw err;
     } finally {
       clearTimeout(timeoutId);
     }
 
-    if (!response.ok) {
-      const errText = await response.text();
-      // 503 = space sleeping
-      if (response.status === 503) {
-        throw new Error('The AI model is currently waking up from sleep. Please try again in a minute.');
-      }
-      throw new Error(`HF Space error (${response.status}): ${errText}`);
+    if (!resultResponse.ok) {
+      throw new Error(`HF Space result error (${resultResponse.status})`);
     }
 
-    const data = await response.json();
+    // SSE format data parse karna (e.g., "data: [null, {url: ...}]\n\nevent: complete")
+    const sseText = await resultResponse.text();
     
-    if (data.error) {
-      throw new Error(data.error);
+    // Starline dhundho jo 'data: ' se shuru hoti hai aur JSON array rakhti hai
+    const dataLine = sseText.split('\n').find(l => l.startsWith('data: ') && !l.includes('event:'));
+    
+    if (!dataLine) {
+      throw new Error('Received empty or invalid SSE response from HF Space');
     }
 
-    const resultImage = data.data?.[0];
+    const parsedData = JSON.parse(dataLine.replace('data: ', ''));
+    
+    // Gradio 6 output format: [error, data_array] or just [data_array]
+    // Hum pehla valid element nikal rahe hain jo image data contain karta hai
+    const resultImage = Array.isArray(parsedData) ? (parsedData.length > 1 ? parsedData[1] : parsedData[0]) : null;
+
     invariant(resultImage, 'GFPGAN returned empty array — HF space likely went to sleep mid-inference');
 
     if (!resultImage) {
