@@ -45,7 +45,7 @@ export const POST = withRobustness(async (req: NextRequest) => {
 
     let response;
     try {
-      response = await fetch(`${spaceUrl.replace(/\/$/, '')}/api/predict`, {
+      response = await fetch(`${spaceUrl.replace(/\/$/, '')}/gradio_api/call/predict`, {
         method: 'POST',
         headers,
         body: JSON.stringify(gradioPayload),
